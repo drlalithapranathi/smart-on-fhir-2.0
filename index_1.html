@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SMART App</title>
+  <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.min.js"></script>
+</head>
+<body>
+  <h1>SMART App Loaded</h1>
+  <div id="output">Loading...</div>
+  <script>
+    console.log("SMART App: Starting FHIR.oauth2.ready()");
+    FHIR.oauth2.ready().then(client => {
+      console.log("SMART App: FHIR client ready", client);
+      
+      // Debug: Log token information
+      console.log("Access Token:", client.state.tokenResponse?.access_token?.substring(0, 20) + "...");
+      console.log("Token expires in:", client.state.tokenResponse?.expires_in, "seconds");
+      console.log("Server URL:", client.state.serverUrl);
+      console.log("Patient ID:", client.patient?.id);
+      console.log("User info:", client.user);
+      
+      // Add token expiry check
+      const tokenExpiry = client.state.tokenResponse?.expires_in;
+      if (tokenExpiry && tokenExpiry < 60) {
+        document.getElementById("output").innerHTML = `
+                      <h2>Token Expiring Soon!</h2>
+          <p>Token expires in ${tokenExpiry} seconds</p>
+          <p>Please re-launch the app from OpenEMR</p>
+        `;
+        return;
+      }
+      
+      // Since we have launch/patient scope, get the patient from context
+      if (client.patient && client.patient.id) {
+        console.log("Making patient request...");
+        
+        // Add explicit headers for debugging
+        client.request(`Patient/${client.patient.id}`, {
+          headers: {
+            'Accept': 'application/fhir+json'
+          }
+        }).then(patient => {
+          console.log("Patient data:", patient);
+          const name = patient.name?.[0];
+          const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
+          
+          document.getElementById("output").innerHTML = `
+            <h2>Successfully Connected!</h2>
+            <h3>Patient Information:</h3>
+            <p><strong>Name:</strong> ${fullName}</p>
+            <p><strong>ID:</strong> ${patient.id}</p>
+            <p><strong>Birth Date:</strong> ${patient.birthDate || 'Not provided'}</p>
+            <p><strong>Gender:</strong> ${patient.gender || 'Not provided'}</p>
+            <h4>Debug Info:</h4>
+            <p><strong>Server:</strong> ${client.state.serverUrl}</p>
+            <p><strong>Token expires in:</strong> ${client.state.tokenResponse?.expires_in || 'Unknown'} seconds</p>
+          `;
+        }).catch(err => {
+          console.error("Error loading patient:", err);
+          console.error("Full error object:", err);
+          
+          // Check if it's a 401 error specifically
+          if (err.status === 401 || err.message.includes('401') || err.message.includes('Unauthorized')) {
+            document.getElementById("output").innerHTML = `
+              <h2>Authentication Error</h2>
+              <p><strong>Issue:</strong> Token is invalid or expired</p>
+              <p><strong>Solution:</strong> Please re-launch the app from OpenEMR</p>
+              <p><strong>Error:</strong> ${err.message}</p>
+              <p><strong>Server:</strong> ${client.state.serverUrl}</p>
+              <button onclick="window.close()">Close and Re-launch</button>
+            `;
+          } else {
+            document.getElementById("output").innerHTML = `
+              <h2>Connected, but patient data unavailable</h2>
+              <p><strong>Error:</strong> ${err.message}</p>
+              <p><strong>Status:</strong> ${err.status || 'Unknown'}</p>
+              <p><strong>User:</strong> ${client.user?.resourceType || 'Unknown'}</p>
+              <p><strong>Server:</strong> ${client.state.serverUrl}</p>
+              <button onclick="location.reload()">Retry</button>
+            `;
+          }
+        });
+      } else {
+        document.getElementById("output").innerHTML = `
+          <h2>Successfully Connected!</h2>
+          <p>No patient context available</p>
+          <p><strong>User:</strong> ${client.user?.resourceType || 'Unknown'}</p>
+          <p><strong>FHIR Server:</strong> ${client.state.serverUrl}</p>
+          <p><strong>Available scopes:</strong> ${client.state.tokenResponse?.scope || 'Unknown'}</p>
+        `;
+      }
+    }).catch(err => {
+      console.error("SMART App: Auth error", err);
+      document.getElementById("output").innerHTML = `
+        <h2>Authentication Failed</h2>
+        <p><strong>Error:</strong> ${err.message}</p>
+        <p>Please launch this app from within OpenEMR</p>
+        <button onclick="location.reload()">Retry</button>
+      `;
+    });
+  </script>
+</body>
+</html>
