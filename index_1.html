@@ -18,6 +18,8 @@
       console.log("Server URL:", client.state.serverUrl);
       console.log("Patient ID:", client.patient?.id);
       console.log("User info:", client.user);
+
+      console.log("Full client object:", JSON.stringify(client, null, 2));
       
       // Add token expiry check
       const tokenExpiry = client.state.tokenResponse?.expires_in;
