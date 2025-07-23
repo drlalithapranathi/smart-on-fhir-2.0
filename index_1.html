@@ -82,15 +82,21 @@
             `;
           }
         });
-      } else {
-        document.getElementById("output").innerHTML = `
-          <h2>Successfully Connected!</h2>
-          <p>No patient context available</p>
-          <p><strong>User:</strong> ${client.user?.resourceType || 'Unknown'}</p>
-          <p><strong>FHIR Server:</strong> ${client.state.serverUrl}</p>
-          <p><strong>Available scopes:</strong> ${client.state.tokenResponse?.scope || 'Unknown'}</p>
-        `;
-      }
+} else {
+  // No patient context - show simple patient selection
+  client.request("Patient?_count=10&_sort=family,given").then(bundle => {
+    let html = '<h2>Select a Patient:</h2>';
+    if (bundle.entry) {
+      bundle.entry.forEach(entry => {
+        const patient = entry.resource;
+        const name = patient.name?.[0];
+        const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
+        html += `<p><a href="javascript:void(0)" onclick="loadPatient('${patient.id}')">${fullName} (ID: ${patient.id})</a></p>`;
+      });
+    }
+    document.getElementById("output").innerHTML = html;
+  });
+}
     }).catch(err => {
       console.error("SMART App: Auth error", err);
       document.getElementById("output").innerHTML = `
