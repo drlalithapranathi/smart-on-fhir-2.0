@@ -83,14 +83,14 @@
           }
         });
       } else {
-        document.getElementById("output").innerHTML = `
-          <h2>Successfully Connected!</h2>
-          <p>No patient context available</p>
-          <p><strong>User:</strong> ${client.user?.resourceType || 'Unknown'}</p>
-          <p><strong>FHIR Server:</strong> ${client.state.serverUrl}</p>
-          <p><strong>Available scopes:</strong> ${client.state.tokenResponse?.scope || 'Unknown'}</p>
-        `;
-      }
+  document.getElementById("output").innerHTML = `
+    <h2>Successfully Connected!</h2>
+    <p>No automatic patient context available</p>
+    <button onclick="showPatientList()">Select Patient Manually</button>
+    <p><strong>User:</strong> ${client.user?.resourceType || 'Unknown'}</p>
+    <p><strong>FHIR Server:</strong> ${client.state.serverUrl}</p>
+  `;
+}
     }).catch(err => {
       console.error("SMART App: Auth error", err);
       document.getElementById("output").innerHTML = `
@@ -100,6 +100,38 @@
         <button onclick="location.reload()">Retry</button>
       `;
     });
+    function showPatientList() {
+  FHIR.oauth2.ready().then(client => {
+    client.request("Patient?_count=10").then(bundle => {
+      let html = '<h2>Select a Patient:</h2>';
+      bundle.entry.forEach(entry => {
+        const patient = entry.resource;
+        const name = patient.name?.[0];
+        const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
+        html += `<p><button onclick="loadPatient('${patient.id}')">${fullName}</button></p>`;
+      });
+      document.getElementById("output").innerHTML = html;
+    });
+  });
+}
+
+function loadPatient(patientId) {
+  FHIR.oauth2.ready().then(client => {
+    client.request(`Patient/${patientId}`).then(patient => {
+      const name = patient.name?.[0];
+      const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
+      
+      document.getElementById("output").innerHTML = `
+        <h2>Patient Information:</h2>
+        <p><strong>Name:</strong> ${fullName}</p>
+        <p><strong>ID:</strong> ${patient.id}</p>
+        <p><strong>Birth Date:</strong> ${patient.birthDate || 'Not provided'}</p>
+        <p><strong>Gender:</strong> ${patient.gender || 'Not provided'}</p>
+        <button onclick="showPatientList()">Back to Patient List</button>
+      `;
+    });
+  });
+}
   </script>
 </body>
 </html>
