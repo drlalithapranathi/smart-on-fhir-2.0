@@ -4,347 +4,122 @@
   <title>SMART App</title>
   <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.min.js"></script>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 20px;
-      background-color: #f8f9fa;
-    }
-    .container {
-      max-width: 900px;
-      margin: 0 auto;
-      background: white;
-      border-radius: 8px;
-      padding: 30px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    button {
-      background-color: #007bff;
-      color: white;
-      padding: 10px 15px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      margin: 5px;
-      font-size: 14px;
-    }
-    button:hover { background-color: #0056b3; }
-    .section {
-      background: #f8f9fa;
-      padding: 20px;
-      margin: 15px 0;
-      border-radius: 6px;
-      border-left: 4px solid #007bff;
-    }
-    .encounter-section {
-      border-left-color: #28a745;
-    }
-    .observation {
-      background: white;
-      border: 1px solid #dee2e6;
-      padding: 15px;
-      margin: 10px 0;
-      border-radius: 4px;
-    }
-    .error { color: #dc3545; background: #f8d7da; padding: 15px; border-radius: 4px; }
-    .success { color: #155724; background: #d4edda; padding: 15px; border-radius: 4px; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f8f9fa; }
+    .container { max-width: 800px; margin: 0 auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .section { background: #f8f9fa; padding: 20px; margin: 15px 0; border-radius: 6px; border-left: 4px solid #007bff; }
+    .encounter-section { border-left-color: #28a745; }
+    .observation { background: white; border: 1px solid #dee2e6; padding: 15px; margin: 10px 0; border-radius: 4px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>SMART App Loaded</h1>
+    <h1>SMART App</h1>
     <div id="output">Loading...</div>
   </div>
 
   <script>
-    let fhirClient = null;
-
-    console.log("SMART App: Starting FHIR.oauth2.ready()");
-    
     FHIR.oauth2.ready().then(client => {
-      console.log("SMART App: FHIR client ready", client);
-      fhirClient = client;
+      console.log("SMART App: Connected with patient context", client.patient?.id);
       
-      // Enhanced debugging
-      console.log("Access Token:", client.state.tokenResponse?.access_token?.substring(0, 20) + "...");
-      console.log("Token expires in:", client.state.tokenResponse?.expires_in, "seconds");
-      console.log("Server URL:", client.state.serverUrl);
-      console.log("Patient ID:", client.patient?.id);
-      console.log("User info:", client.user);
-      console.log("Full client state:", client.state);
-      console.log("Available scopes:", client.state.tokenResponse?.scope);
-
-      // Check token expiry
-      const tokenExpiry = client.state.tokenResponse?.expires_in;
-      if (tokenExpiry && tokenExpiry < 120) { // Give more time buffer
-        document.getElementById("output").innerHTML = `
-          <div class="error">
-            <h2>Token Expiring Soon!</h2>
-            <p>Token expires in ${tokenExpiry} seconds</p>
-            <p>Please re-launch the app from OpenEMR for a fresh session</p>
-            <button onclick="window.close()">Close and Re-launch</button>
-          </div>
-        `;
-        return;
-      }
-      
-      // Try multiple methods to get patient ID
-      let patientId = null;
-      
-      // Method 1: Direct patient context
       if (client.patient && client.patient.id) {
-        patientId = client.patient.id;
-        console.log("Found patient ID from context:", patientId);
-        loadPatientData(patientId);
-      } 
-      // Method 2: If no patient context, try to find the only patient
-      else {
-        console.log("No patient context, searching for available patients...");
-        findAndLoadPatient();
+        loadPatientData(client.patient.id);
+      } else {
+        document.getElementById("output").innerHTML = `
+          <h2>No Patient Context</h2>
+          <p>Please ensure you're launching from a patient's chart in OpenEMR</p>
+        `;
       }
-      
     }).catch(err => {
-      console.error("SMART App: Auth error", err);
       document.getElementById("output").innerHTML = `
-        <div class="error">
-          <h2>Authentication Failed</h2>
-          <p><strong>Error:</strong> ${err.message}</p>
-          <p>Please launch this app from within OpenEMR</p>
-          <button onclick="location.reload()">Retry</button>
-        </div>
+        <h2>Connection Failed</h2>
+        <p>Error: ${err.message}</p>
       `;
     });
 
-    function findAndLoadPatient() {
-      document.getElementById("output").innerHTML = `
-        <div class="success">
-          <h2>Successfully Connected!</h2>
-          <p>Searching for available patients...</p>
-        </div>
-      `;
-
-      fhirClient.request("Patient?_count=5").then(bundle => {
-        console.log("Patient search result:", bundle);
-        
-        if (bundle.entry && bundle.entry.length > 0) {
-          if (bundle.entry.length === 1) {
-            // Only one patient - load automatically
-            const patient = bundle.entry[0].resource;
-            console.log("Found single patient, loading automatically:", patient.id);
-            loadPatientData(patient.id);
-          } else {
-            // Multiple patients - show selection
-            showPatientSelection(bundle.entry);
-          }
-        } else {
-          document.getElementById("output").innerHTML = `
-            <div class="error">
-              <h2>No Patients Found</h2>
-              <p>No patients available in the system</p>
-            </div>
-          `;
-        }
-      }).catch(err => {
-        console.error("Error finding patients:", err);
-        handleError(err, "searching for patients");
-      });
-    }
-
-    function showPatientSelection(patients) {
-      let html = `
-        <div class="success">
-          <h2>Successfully Connected!</h2>
-          <p>Found ${patients.length} patients. Select one to view their information:</p>
-        </div>
-      `;
-
-      patients.forEach(entry => {
-        const patient = entry.resource;
-        const name = patient.name?.[0];
-        const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed Patient";
-        const birthDate = patient.birthDate || 'Unknown';
-        const age = patient.birthDate ? calculateAge(patient.birthDate) : 'Unknown';
-
-        html += `
-          <div class="section">
-            <h3>${fullName}</h3>
-            <p><strong>Birth Date:</strong> ${birthDate} (Age: ${age})</p>
-            <p><strong>Patient ID:</strong> ${patient.id}</p>
-            <button onclick="loadPatientData('${patient.id}')">Select This Patient</button>
-          </div>
-        `;
-      });
-
-      document.getElementById("output").innerHTML = html;
-    }
-
     function loadPatientData(patientId) {
-      console.log("Loading data for patient:", patientId);
-      
-      document.getElementById("output").innerHTML = `
-        <div class="success">
-          <h2>Loading Patient Data...</h2>
-          <p>Retrieving patient information, last encounter, and observations...</p>
-        </div>
-      `;
-
-      // Load patient basic information
-      fhirClient.request(`Patient/${patientId}`).then(patient => {
-        console.log("Patient data loaded:", patient);
-        
-        // Display patient info immediately
+      // Load patient info
+      FHIR.oauth2.ready().then(client => {
+        return client.request(`Patient/${patientId}`);
+      }).then(patient => {
         displayPatientInfo(patient);
-        
-        // Load last encounter
-        return fhirClient.request(`Encounter?patient=${patientId}&_sort=-date&_count=1`);
-        
+        return FHIR.oauth2.ready().then(client => 
+          client.request(`Encounter?patient=${patientId}&_sort=-date&_count=1`)
+        );
       }).then(encounterBundle => {
-        console.log("Encounter data:", encounterBundle);
-        
         if (encounterBundle.entry && encounterBundle.entry.length > 0) {
-          const lastEncounter = encounterBundle.entry[0].resource;
-          displayEncounterInfo(lastEncounter);
-          
-          // Load observations from this encounter
-          return fhirClient.request(`Observation?encounter=${lastEncounter.id}&_sort=date`);
-        } else {
-          document.getElementById("encounterInfo").innerHTML = `
-            <div class="section encounter-section">
-              <h3>Last Encounter</h3>
-              <p>No encounters found for this patient</p>
-            </div>
-          `;
-          return Promise.resolve({ entry: [] });
+          const encounter = encounterBundle.entry[0].resource;
+          displayEncounterInfo(encounter);
+          return FHIR.oauth2.ready().then(client =>
+            client.request(`Observation?encounter=${encounter.id}&_sort=date`)
+          );
         }
-        
-      }).then(observationBundle => {
-        console.log("Observation data:", observationBundle);
-        displayObservations(observationBundle.entry || []);
-        
+        return { entry: [] };
+      }).then(obsBundle => {
+        displayObservations(obsBundle.entry || []);
       }).catch(err => {
-        console.error("Error loading patient data:", err);
-        handleError(err, "loading patient data");
+        document.getElementById("output").innerHTML = `<p>Error: ${err.message}</p>`;
       });
     }
 
     function displayPatientInfo(patient) {
       const name = patient.name?.[0];
-      const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed Patient";
+      const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
       const age = patient.birthDate ? calculateAge(patient.birthDate) : 'Unknown';
-      const gender = patient.gender || 'Not specified';
       
       document.getElementById("output").innerHTML = `
-        <h2>Patient Information Dashboard</h2>
-        
+        <h2>Patient Information</h2>
         <div class="section">
           <h3>Patient Details</h3>
           <p><strong>Name:</strong> ${fullName}</p>
           <p><strong>Age:</strong> ${age}</p>
-          <p><strong>Gender:</strong> ${gender}</p>
+          <p><strong>Gender:</strong> ${patient.gender || 'Not specified'}</p>
           <p><strong>Birth Date:</strong> ${patient.birthDate || 'Not provided'}</p>
-          <p><strong>Patient ID:</strong> ${patient.id}</p>
         </div>
-
-        <div id="encounterInfo">Loading encounter information...</div>
-        <div id="observationInfo">Loading observations...</div>
-
-        <div style="margin-top: 20px;">
-          <button onclick="findAndLoadPatient()">Back to Patient Selection</button>
-          <button onclick="location.reload()">Refresh</button>
-        </div>
+        <div id="encounterInfo"></div>
+        <div id="observationInfo"></div>
       `;
     }
 
     function displayEncounterInfo(encounter) {
-      const encounterDate = encounter.period?.start ? 
-        new Date(encounter.period.start).toLocaleDateString() + ' ' + 
-        new Date(encounter.period.start).toLocaleTimeString() : 'Unknown date';
-      
-      const encounterType = encounter.type?.[0]?.coding?.[0]?.display || 
-        encounter.type?.[0]?.text || 'Unknown type';
-      
-      const encounterStatus = encounter.status || 'Unknown status';
+      const date = encounter.period?.start ? new Date(encounter.period.start).toLocaleDateString() : 'Unknown';
+      const type = encounter.type?.[0]?.coding?.[0]?.display || 'Unknown type';
       
       document.getElementById("encounterInfo").innerHTML = `
         <div class="section encounter-section">
           <h3>Last Encounter</h3>
-          <p><strong>Date:</strong> ${encounterDate}</p>
-          <p><strong>Type:</strong> ${encounterType}</p>
-          <p><strong>Status:</strong> ${encounterStatus}</p>
-          <p><strong>Encounter ID:</strong> ${encounter.id}</p>
+          <p><strong>Date:</strong> ${date}</p>
+          <p><strong>Type:</strong> ${type}</p>
+          <p><strong>Status:</strong> ${encounter.status}</p>
         </div>
       `;
     }
 
     function displayObservations(observations) {
-      let html = `
-        <div class="section">
-          <h3>Observations from Last Encounter</h3>
-      `;
+      let html = '<div class="section"><h3>Observations from Last Encounter</h3>';
       
       if (observations.length > 0) {
-        html += `<p>Found ${observations.length} observations:</p>`;
-        
         observations.forEach(entry => {
           const obs = entry.resource;
-          const display = obs.code?.coding?.[0]?.display || obs.code?.text || 'Unknown Observation';
-          
-          let value = 'No value recorded';
-          if (obs.valueQuantity) {
-            value = `${obs.valueQuantity.value} ${obs.valueQuantity.unit || obs.valueQuantity.code || ''}`;
-          } else if (obs.valueString) {
-            value = obs.valueString;
-          } else if (obs.valueCodeableConcept) {
-            value = obs.valueCodeableConcept.text || obs.valueCodeableConcept.coding?.[0]?.display || 'Coded value';
-          }
-          
-          const date = obs.effectiveDateTime ? 
-            new Date(obs.effectiveDateTime).toLocaleString() : 'Unknown date';
-          
-          const status = obs.status || 'Unknown';
+          const display = obs.code?.coding?.[0]?.display || 'Unknown Observation';
+          const value = obs.valueQuantity ? 
+            `${obs.valueQuantity.value} ${obs.valueQuantity.unit || ''}` : 
+            obs.valueString || 'No value';
+          const date = obs.effectiveDateTime ? new Date(obs.effectiveDateTime).toLocaleDateString() : 'Unknown';
           
           html += `
             <div class="observation">
               <h4>${display}</h4>
               <p><strong>Value:</strong> ${value}</p>
-              <p><strong>Date/Time:</strong> ${date}</p>
-              <p><strong>Status:</strong> ${status}</p>
+              <p><strong>Date:</strong> ${date}</p>
             </div>
           `;
         });
       } else {
-        html += '<p>No observations found for this encounter</p>';
+        html += '<p>No observations found</p>';
       }
       
       html += '</div>';
       document.getElementById("observationInfo").innerHTML = html;
-    }
-
-    function handleError(err, action) {
-      console.error(`Error ${action}:`, err);
-      
-      let errorMessage = `
-        <div class="error">
-          <h2>Error ${action}</h2>
-          <p><strong>Error:</strong> ${err.message}</p>
-          <p><strong>Status:</strong> ${err.status || 'Unknown'}</p>
-      `;
-      
-      if (err.status === 401 || err.message.includes('401') || err.message.includes('Unauthorized')) {
-        errorMessage += `
-          <p><strong>Issue:</strong> Session expired or invalid token</p>
-          <p><strong>Solution:</strong> Please re-launch the app from OpenEMR</p>
-          <button onclick="window.close()">Close and Re-launch</button>
-        `;
-      } else {
-        errorMessage += `
-          <button onclick="location.reload()">Retry</button>
-          <button onclick="findAndLoadPatient()">Back to Patient Selection</button>
-        `;
-      }
-      
-      errorMessage += '</div>';
-      document.getElementById("output").innerHTML = errorMessage;
     }
 
     function calculateAge(birthDate) {
