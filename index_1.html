@@ -25,7 +25,7 @@
       const tokenExpiry = client.state.tokenResponse?.expires_in;
       if (tokenExpiry && tokenExpiry < 60) {
         document.getElementById("output").innerHTML = `
-                      <h2>Token Expiring Soon!</h2>
+          <h2>Token Expiring Soon!</h2>
           <p>Token expires in ${tokenExpiry} seconds</p>
           <p>Please re-launch the app from OpenEMR</p>
         `;
@@ -53,6 +53,13 @@
             <p><strong>ID:</strong> ${patient.id}</p>
             <p><strong>Birth Date:</strong> ${patient.birthDate || 'Not provided'}</p>
             <p><strong>Gender:</strong> ${patient.gender || 'Not provided'}</p>
+            
+            <h3>Load Clinical Data:</h3>
+            <button onclick="loadObservations('${patient.id}')">Load Observations</button>
+            <button onclick="loadConditions('${patient.id}')">Load Conditions</button>
+            <button onclick="loadMedications('${patient.id}')">Load Medications</button>
+            <div id="clinicalData"></div>
+            
             <h4>Debug Info:</h4>
             <p><strong>Server:</strong> ${client.state.serverUrl}</p>
             <p><strong>Token expires in:</strong> ${client.state.tokenResponse?.expires_in || 'Unknown'} seconds</p>
@@ -83,14 +90,14 @@
           }
         });
       } else {
-  document.getElementById("output").innerHTML = `
-    <h2>Successfully Connected!</h2>
-    <p>No automatic patient context available</p>
-    <button onclick="showPatientList()">Select Patient Manually</button>
-    <p><strong>User:</strong> ${client.user?.resourceType || 'Unknown'}</p>
-    <p><strong>FHIR Server:</strong> ${client.state.serverUrl}</p>
-  `;
-}
+        document.getElementById("output").innerHTML = `
+          <h2>Successfully Connected!</h2>
+          <p>No automatic patient context available</p>
+          <button onclick="showPatientList()">Select Patient Manually</button>
+          <p><strong>User:</strong> ${client.user?.resourceType || 'Unknown'}</p>
+          <p><strong>FHIR Server:</strong> ${client.state.serverUrl}</p>
+        `;
+      }
     }).catch(err => {
       console.error("SMART App: Auth error", err);
       document.getElementById("output").innerHTML = `
@@ -100,38 +107,119 @@
         <button onclick="location.reload()">Retry</button>
       `;
     });
-    function showPatientList() {
-  FHIR.oauth2.ready().then(client => {
-    client.request("Patient?_count=10").then(bundle => {
-      let html = '<h2>Select a Patient:</h2>';
-      bundle.entry.forEach(entry => {
-        const patient = entry.resource;
-        const name = patient.name?.[0];
-        const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
-        html += `<p><button onclick="loadPatient('${patient.id}')">${fullName}</button></p>`;
-      });
-      document.getElementById("output").innerHTML = html;
-    });
-  });
-}
 
-function loadPatient(patientId) {
-  FHIR.oauth2.ready().then(client => {
-    client.request(`Patient/${patientId}`).then(patient => {
-      const name = patient.name?.[0];
-      const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
-      
-      document.getElementById("output").innerHTML = `
-        <h2>Patient Information:</h2>
-        <p><strong>Name:</strong> ${fullName}</p>
-        <p><strong>ID:</strong> ${patient.id}</p>
-        <p><strong>Birth Date:</strong> ${patient.birthDate || 'Not provided'}</p>
-        <p><strong>Gender:</strong> ${patient.gender || 'Not provided'}</p>
-        <button onclick="showPatientList()">Back to Patient List</button>
-      `;
-    });
-  });
-}
+    function showPatientList() {
+      FHIR.oauth2.ready().then(client => {
+        client.request("Patient?_count=10").then(bundle => {
+          let html = '<h2>Select a Patient:</h2>';
+          bundle.entry.forEach(entry => {
+            const patient = entry.resource;
+            const name = patient.name?.[0];
+            const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
+            html += `<p><button onclick="loadPatient('${patient.id}')">${fullName}</button></p>`;
+          });
+          document.getElementById("output").innerHTML = html;
+        });
+      });
+    }
+
+    function loadPatient(patientId) {
+      FHIR.oauth2.ready().then(client => {
+        client.request(`Patient/${patientId}`).then(patient => {
+          const name = patient.name?.[0];
+          const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
+          
+          document.getElementById("output").innerHTML = `
+            <h2>Patient Information:</h2>
+            <p><strong>Name:</strong> ${fullName}</p>
+            <p><strong>ID:</strong> ${patient.id}</p>
+            <p><strong>Birth Date:</strong> ${patient.birthDate || 'Not provided'}</p>
+            <p><strong>Gender:</strong> ${patient.gender || 'Not provided'}</p>
+            
+            <h3>Load Clinical Data:</h3>
+            <button onclick="loadObservations('${patient.id}')">Load Observations</button>
+            <button onclick="loadConditions('${patient.id}')">Load Conditions</button>
+            <button onclick="loadMedications('${patient.id}')">Load Medications</button>
+            <div id="clinicalData"></div>
+            
+            <button onclick="showPatientList()">Back to Patient List</button>
+          `;
+        });
+      });
+    }
+
+    function loadObservations(patientId) {
+      FHIR.oauth2.ready().then(client => {
+        document.getElementById("clinicalData").innerHTML = '<p>Loading observations...</p>';
+        client.request(`Observation?patient=${patientId}&_count=5&_sort=-date`).then(bundle => {
+          let html = '<h3>Recent Observations:</h3>';
+          if (bundle.entry && bundle.entry.length > 0) {
+            bundle.entry.forEach(entry => {
+              const obs = entry.resource;
+              const display = obs.code?.coding?.[0]?.display || obs.code?.text || 'Unknown';
+              const value = obs.valueQuantity ? 
+                `${obs.valueQuantity.value} ${obs.valueQuantity.unit || obs.valueQuantity.code}` : 
+                obs.valueString || 'No value';
+              const date = obs.effectiveDateTime ? new Date(obs.effectiveDateTime).toLocaleDateString() : 'Unknown';
+              html += `<p><strong>${display}:</strong> ${value} (${date})</p>`;
+            });
+          } else {
+            html += '<p>No observations found</p>';
+          }
+          document.getElementById("clinicalData").innerHTML = html;
+        }).catch(err => {
+          console.error("Error loading observations:", err);
+          document.getElementById("clinicalData").innerHTML = `<p>Error loading observations: ${err.message}</p>`;
+        });
+      });
+    }
+
+    function loadConditions(patientId) {
+      FHIR.oauth2.ready().then(client => {
+        document.getElementById("clinicalData").innerHTML = '<p>Loading conditions...</p>';
+        client.request(`Condition?patient=${patientId}&_count=5`).then(bundle => {
+          let html = '<h3>Patient Conditions:</h3>';
+          if (bundle.entry && bundle.entry.length > 0) {
+            bundle.entry.forEach(entry => {
+              const condition = entry.resource;
+              const display = condition.code?.coding?.[0]?.display || condition.code?.text || 'Unknown';
+              const status = condition.clinicalStatus?.coding?.[0]?.code || 'Unknown status';
+              html += `<p><strong>${display}</strong> - Status: ${status}</p>`;
+            });
+          } else {
+            html += '<p>No conditions found</p>';
+          }
+          document.getElementById("clinicalData").innerHTML = html;
+        }).catch(err => {
+          console.error("Error loading conditions:", err);
+          document.getElementById("clinicalData").innerHTML = `<p>Error loading conditions: ${err.message}</p>`;
+        });
+      });
+    }
+
+    function loadMedications(patientId) {
+      FHIR.oauth2.ready().then(client => {
+        document.getElementById("clinicalData").innerHTML = '<p>Loading medications...</p>';
+        client.request(`MedicationRequest?patient=${patientId}&_count=5&_sort=-date`).then(bundle => {
+          let html = '<h3>Medications:</h3>';
+          if (bundle.entry && bundle.entry.length > 0) {
+            bundle.entry.forEach(entry => {
+              const med = entry.resource;
+              const display = med.medicationCodeableConcept?.coding?.[0]?.display || 
+                              med.medicationCodeableConcept?.text || 'Unknown Medication';
+              const status = med.status || 'Unknown status';
+              html += `<p><strong>${display}</strong> - Status: ${status}</p>`;
+            });
+          } else {
+            html += '<p>No medications found</p>';
+          }
+          document.getElementById("clinicalData").innerHTML = html;
+        }).catch(err => {
+          console.error("Error loading medications:", err);
+          document.getElementById("clinicalData").innerHTML = `<p>Error loading medications: ${err.message}</p>`;
+        });
+      });
+    }
   </script>
 </body>
 </html>
