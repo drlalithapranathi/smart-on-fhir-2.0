@@ -68,6 +68,12 @@
       console.log("SMART App: FHIR client ready", client);
       fhirClient = client;
       
+      // Enhanced debugging
+      console.log("Full client state:", client.state);
+      console.log("Patient context:", client.patient);
+      console.log("User context:", client.user);
+      console.log("Token info:", client.state.tokenResponse);
+      
       // Check token expiry
       const tokenExpiry = client.state.tokenResponse?.expires_in;
       if (tokenExpiry && tokenExpiry < 60) {
@@ -79,10 +85,39 @@
         return;
       }
       
-      // Check for automatic patient context
+      // Try multiple ways to get patient ID
+      let patientId = null;
+      
+      // Method 1: Direct patient context
       if (client.patient && client.patient.id) {
-        loadPatientWithEncounter(client.patient.id);
+        patientId = client.patient.id;
+        console.log("Found patient ID from client.patient:", patientId);
+      }
+      
+      // Method 2: Check URL parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      const patientParam = urlParams.get('patient');
+      if (!patientId && patientParam) {
+        patientId = patientParam;
+        console.log("Found patient ID from URL parameter:", patientId);
+      }
+      
+      // Method 3: Check if patient context exists in state
+      if (!patientId && client.state.tokenResponse) {
+        const tokenInfo = client.state.tokenResponse;
+        console.log("Checking token response for patient info:", tokenInfo);
+        // Sometimes patient ID is in the token response
+        if (tokenInfo.patient) {
+          patientId = tokenInfo.patient;
+          console.log("Found patient ID from token response:", patientId);
+        }
+      }
+      
+      if (patientId) {
+        console.log("Loading patient with ID:", patientId);
+        loadPatientWithEncounter(patientId);
       } else {
+        console.log("No patient context found, showing patient selection");
         showPatientSelection();
       }
       
@@ -99,32 +134,67 @@
     function showPatientSelection() {
       document.getElementById("output").innerHTML = `
         <h2>Successfully Connected!</h2>
-        <p>No automatic patient context available</p>
-        <button onclick="loadPatientList()">Select Patient Manually</button>
-        <p>User: ${fhirClient.user?.resourceType || 'Unknown'}</p>
-        <p>FHIR Server: ${fhirClient.state.serverUrl}</p>
+        <p>No automatic patient context detected</p>
+        <div style="margin: 20px 0;">
+          <button onclick="loadPatientList()">Select Patient Manually</button>
+          <button onclick="loadFirstPatient()">Load First Available Patient</button>
+        </div>
+        <p><strong>User:</strong> ${fhirClient.user?.resourceType || 'Unknown'}</p>
+        <p><strong>FHIR Server:</strong> ${fhirClient.state.serverUrl}</p>
+        <p><strong>Debug:</strong> Check console for detailed context information</p>
       `;
+    }
+
+    function loadFirstPatient() {
+      document.getElementById("output").innerHTML = '<p>Finding your patient...</p>';
+      
+      fhirClient.request("Patient?_count=1").then(bundle => {
+        if (bundle.entry && bundle.entry.length > 0) {
+          const patient = bundle.entry[0].resource;
+          console.log("Loading first patient found:", patient);
+          loadPatientWithEncounter(patient.id);
+        } else {
+          document.getElementById("output").innerHTML = '<p>No patients found in the system</p>';
+        }
+      }).catch(err => {
+        console.error("Error loading first patient:", err);
+        document.getElementById("output").innerHTML = `<p>Error: ${err.message}</p>`;
+      });
     }
 
     function loadPatientList() {
       document.getElementById("output").innerHTML = '<p>Loading patient list...</p>';
 
-      fhirClient.request("Patient?_count=10").then(bundle => {
+      fhirClient.request("Patient?_count=5").then(bundle => {
         let html = '<h2>Select a Patient:</h2>';
         if (bundle.entry && bundle.entry.length > 0) {
           bundle.entry.forEach(entry => {
             const patient = entry.resource;
             const name = patient.name?.[0];
             const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed";
-            html += `<p><button onclick="loadPatientWithEncounter('${patient.id}')">${fullName}</button></p>`;
+            const birthDate = patient.birthDate || 'Unknown';
+            html += `
+              <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                <h3>${fullName}</h3>
+                <p>Birth Date: ${birthDate}</p>
+                <p>Patient ID: ${patient.id}</p>
+                <button onclick="loadPatientWithEncounter('${patient.id}')">Select This Patient</button>
+              </div>
+            `;
           });
         } else {
           html += '<p>No patients found</p>';
         }
+        html += '<div style="margin-top: 20px;"><button onclick="showPatientSelection()">Back</button></div>';
         document.getElementById("output").innerHTML = html;
       }).catch(err => {
         console.error("Error loading patients:", err);
-        document.getElementById("output").innerHTML = `<p>Error loading patients: ${err.message}</p>`;
+        document.getElementById("output").innerHTML = `
+          <h2>Error Loading Patients</h2>
+          <p>Error: ${err.message}</p>
+          <p>This might be a session timeout. Try re-launching the app.</p>
+          <button onclick="location.reload()">Retry</button>
+        `;
       });
     }
 
@@ -156,19 +226,13 @@
         }
       }).catch(err => {
         console.error("Error loading patient data:", err);
-        if (err.status === 401) {
-          document.getElementById("output").innerHTML = `
-            <h2>Authentication Error</h2>
-            <p>Token is invalid or expired</p>
-            <p>Please re-launch the app from OpenEMR</p>
-          `;
-        } else {
-          document.getElementById("output").innerHTML = `
-            <h2>Error Loading Patient Data</h2>
-            <p>Error: ${err.message}</p>
-            <button onclick="loadPatientList()">Back to Patient List</button>
-          `;
-        }
+        document.getElementById("output").innerHTML = `
+          <h2>Error Loading Patient Data</h2>
+          <p>Error: ${err.message}</p>
+          <p>Status: ${err.status}</p>
+          ${err.status === 401 ? '<p>Session expired - please re-launch the app from OpenEMR</p>' : ''}
+          <button onclick="showPatientSelection()">Try Again</button>
+        `;
       });
     }
 
@@ -193,7 +257,7 @@
         <div id="observationInfo"></div>
 
         <div style="margin-top: 20px;">
-          <button onclick="loadPatientList()">Back to Patient List</button>
+          <button onclick="showPatientSelection()">Back to Selection</button>
         </div>
       `;
     }
