@@ -1,203 +1,182 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>SMART App</title>
+  <title>SMART App Debug</title>
   <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
     .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; }
-    .section { background: #f8f9fa; padding: 20px; margin: 15px 0; border-radius: 6px; border-left: 4px solid #007bff; }
-    .encounter { border-left-color: #28a745; }
-    .observation { background: white; border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 4px; }
-    .error { background: #f8d7da; border-left-color: #dc3545; color: #721c24; }
-    button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
+    .debug { background: #e7f3ff; padding: 15px; margin: 10px 0; border-left: 4px solid #007bff; font-family: monospace; font-size: 12px; }
+    .error { background: #f8d7da; padding: 15px; margin: 10px 0; border-left: 4px solid #dc3545; }
+    .success { background: #d4edda; padding: 15px; margin: 10px 0; border-left: 4px solid #28a745; }
+    button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>SMART App - Patient Dashboard</h1>
-    <div id="output">Loading...</div>
+    <h1>SMART App - Diagnostic Mode</h1>
+    <div id="output">Starting diagnostics...</div>
   </div>
 
   <script>
-    console.log("Starting SMART App...");
+    console.log("=== SMART App Diagnostic Mode ===");
     
     FHIR.oauth2.ready().then(client => {
-      console.log("Connected to FHIR server");
+      console.log("✅ FHIR.oauth2.ready() succeeded");
       
-      // Just load the first (and only) patient immediately
-      loadPranathiTest(client);
+      // Comprehensive debugging
+      const debugInfo = {
+        hasClient: !!client,
+        hasState: !!client.state,
+        hasTokenResponse: !!client.state?.tokenResponse,
+        serverUrl: client.state?.serverUrl,
+        tokenType: client.state?.tokenResponse?.token_type,
+        accessToken: client.state?.tokenResponse?.access_token ? "Present" : "Missing",
+        scope: client.state?.tokenResponse?.scope,
+        expiresIn: client.state?.tokenResponse?.expires_in,
+        patientContext: client.patient?.id || "None",
+        userContext: client.user?.resourceType || "None"
+      };
+      
+      console.log("Debug Info:", debugInfo);
+      
+      document.getElementById("output").innerHTML = `
+        <div class="success">
+          <h2>✅ Connection Successful</h2>
+          <p>SMART on FHIR client initialized successfully</p>
+        </div>
+        
+        <div class="debug">
+          <h3>🔍 Debug Information</h3>
+          <pre>${JSON.stringify(debugInfo, null, 2)}</pre>
+        </div>
+        
+        <div style="margin: 20px 0;">
+          <button onclick="testPatientAccess()">Test Patient Access</button>
+          <button onclick="testBasicFhir()">Test Basic FHIR</button>
+          <button onclick="testCapabilities()">Test Server Capabilities</button>
+        </div>
+        
+        <div id="testResults"></div>
+      `;
       
     }).catch(err => {
-      console.error("Connection failed:", err);
+      console.error("❌ FHIR.oauth2.ready() failed:", err);
       document.getElementById("output").innerHTML = `
-        <div class="section error">
-          <h2>Connection Failed</h2>
-          <p>Please launch from OpenEMR and ensure tokens are configured properly</p>
-          <button onclick="location.reload()">Retry</button>
+        <div class="error">
+          <h2>❌ Connection Failed</h2>
+          <p><strong>Error:</strong> ${err.message}</p>
+          <p><strong>Type:</strong> ${err.name}</p>
+          <pre>${err.stack}</pre>
         </div>
       `;
     });
 
-    function loadPranathiTest(client) {
-      document.getElementById("output").innerHTML = '<p>Loading Pranathi Test data...</p>';
+    function testPatientAccess() {
+      document.getElementById("testResults").innerHTML = '<p>🔄 Testing patient access...</p>';
       
-      // Since you only have one patient, search and load automatically
-      client.request("Patient?name=Pranathi&_count=1")
-        .then(bundle => {
-          if (bundle.entry && bundle.entry.length > 0) {
-            const patient = bundle.entry[0].resource;
-            return loadCompletePatientData(client, patient);
-          } else {
-            // Fallback: get any patient
-            return client.request("Patient?_count=1").then(bundle => {
-              if (bundle.entry && bundle.entry.length > 0) {
-                return loadCompletePatientData(client, bundle.entry[0].resource);
-              } else {
-                throw new Error("No patients found");
-              }
-            });
+      FHIR.oauth2.ready().then(client => {
+        console.log("Testing Patient?_count=1");
+        
+        return client.request("Patient?_count=1", {
+          headers: {
+            'Accept': 'application/fhir+json',
+            'Cache-Control': 'no-cache'
           }
-        })
-        .catch(err => {
-          console.error("Error:", err);
-          document.getElementById("output").innerHTML = `
-            <div class="section error">
-              <h2>Session Expired</h2>
-              <p>Please close this window and re-launch the app from OpenEMR</p>
-              <p>Error: ${err.message}</p>
-              <button onclick="window.close()">Close Window</button>
-            </div>
-          `;
         });
-    }
-
-    async function loadCompletePatientData(client, patient) {
-      try {
-        // Display patient info
-        displayPatientInfo(patient);
-        
-        // Get last encounter
-        const encounterBundle = await client.request(`Encounter?patient=${patient.id}&_sort=-date&_count=1`);
-        
-        if (encounterBundle.entry && encounterBundle.entry.length > 0) {
-          const encounter = encounterBundle.entry[0].resource;
-          displayEncounterInfo(encounter);
-          
-          // Get observations from that encounter
-          const obsBundle = await client.request(`Observation?encounter=${encounter.id}&_sort=date`);
-          displayObservations(obsBundle.entry || []);
-        } else {
-          document.getElementById("encounterInfo").innerHTML = `
-            <div class="section encounter">
-              <h3>Last Encounter</h3>
-              <p>No encounters found for this patient</p>
-            </div>
-          `;
-          document.getElementById("observationInfo").innerHTML = `
-            <div class="section">
-              <h3>Observations</h3>
-              <p>No observations available</p>
-            </div>
-          `;
-        }
-        
-      } catch (err) {
-        console.error("Error loading patient data:", err);
-        document.getElementById("output").innerHTML = `
-          <div class="section error">
-            <h2>Data Loading Failed</h2>
-            <p>Error: ${err.message}</p>
-            <button onclick="location.reload()">Retry</button>
+      }).then(result => {
+        console.log("✅ Patient access successful:", result);
+        document.getElementById("testResults").innerHTML = `
+          <div class="success">
+            <h3>✅ Patient Access: SUCCESS</h3>
+            <p>Successfully retrieved patient data</p>
+            <p><strong>Total patients:</strong> ${result.total || 'Unknown'}</p>
+            <p><strong>Returned:</strong> ${result.entry?.length || 0} patients</p>
+            <pre>${JSON.stringify(result, null, 2).substring(0, 500)}...</pre>
           </div>
         `;
-      }
+      }).catch(err => {
+        console.error("❌ Patient access failed:", err);
+        document.getElementById("testResults").innerHTML = `
+          <div class="error">
+            <h3>❌ Patient Access: FAILED</h3>
+            <p><strong>Status:</strong> ${err.status}</p>
+            <p><strong>Message:</strong> ${err.message}</p>
+            <p><strong>URL:</strong> ${err.url || 'Unknown'}</p>
+            <pre>${JSON.stringify(err, null, 2)}</pre>
+          </div>
+        `;
+      });
     }
 
-    function displayPatientInfo(patient) {
-      const name = patient.name?.[0];
-      const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed Patient";
-      const age = patient.birthDate ? calculateAge(patient.birthDate) : 'Unknown';
+    function testBasicFhir() {
+      document.getElementById("testResults").innerHTML = '<p>🔄 Testing basic FHIR access...</p>';
       
-      document.getElementById("output").innerHTML = `
-        <div class="section">
-          <h2>Patient Information</h2>
-          <p><strong>Name:</strong> ${fullName}</p>
-          <p><strong>Age:</strong> ${age}</p>
-          <p><strong>Gender:</strong> ${patient.gender || 'Not specified'}</p>
-          <p><strong>Birth Date:</strong> ${patient.birthDate || 'Not provided'}</p>
-          <p><strong>Patient ID:</strong> ${patient.id}</p>
-        </div>
+      FHIR.oauth2.ready().then(client => {
+        console.log("Testing metadata endpoint");
+        return client.request("metadata");
+      }).then(result => {
+        console.log("✅ Metadata access successful");
+        document.getElementById("testResults").innerHTML = `
+          <div class="success">
+            <h3>✅ Basic FHIR: SUCCESS</h3>
+            <p>Server metadata retrieved successfully</p>
+            <p><strong>FHIR Version:</strong> ${result.fhirVersion}</p>
+            <p><strong>Software:</strong> ${result.software?.name}</p>
+          </div>
+        `;
+      }).catch(err => {
+        console.error("❌ Metadata access failed:", err);
+        document.getElementById("testResults").innerHTML = `
+          <div class="error">
+            <h3>❌ Basic FHIR: FAILED</h3>
+            <p><strong>Error:</strong> ${err.message}</p>
+          </div>
+        `;
+      });
+    }
+
+    function testCapabilities() {
+      document.getElementById("testResults").innerHTML = '<p>🔄 Testing server capabilities...</p>';
+      
+      FHIR.oauth2.ready().then(client => {
+        // Test what we can actually access
+        const tests = [
+          { name: "Patient", url: "Patient?_summary=count" },
+          { name: "Encounter", url: "Encounter?_summary=count" },
+          { name: "Observation", url: "Observation?_summary=count" }
+        ];
         
-        <div id="encounterInfo">Loading encounter...</div>
-        <div id="observationInfo">Loading observations...</div>
-      `;
-    }
-
-    function displayEncounterInfo(encounter) {
-      const date = encounter.period?.start ? 
-        new Date(encounter.period.start).toLocaleDateString() : 'Unknown';
-      const type = encounter.type?.[0]?.coding?.[0]?.display || 
-        encounter.type?.[0]?.text || 'Unknown type';
-      
-      document.getElementById("encounterInfo").innerHTML = `
-        <div class="section encounter">
-          <h3>Last Encounter</h3>
-          <p><strong>Date:</strong> ${date}</p>
-          <p><strong>Type:</strong> ${type}</p>
-          <p><strong>Status:</strong> ${encounter.status || 'Unknown'}</p>
-          <p><strong>Encounter ID:</strong> ${encounter.id}</p>
-        </div>
-      `;
-    }
-
-    function displayObservations(observations) {
-      let html = `
-        <div class="section">
-          <h3>Observations from Last Encounter</h3>
-      `;
-      
-      if (observations.length > 0) {
-        html += `<p>Found ${observations.length} observations:</p>`;
-        observations.forEach(entry => {
-          const obs = entry.resource;
-          const display = obs.code?.coding?.[0]?.display || obs.code?.text || 'Unknown';
-          let value = 'No value';
-          
-          if (obs.valueQuantity) {
-            value = `${obs.valueQuantity.value} ${obs.valueQuantity.unit || ''}`;
-          } else if (obs.valueString) {
-            value = obs.valueString;
+        const testPromises = tests.map(test => 
+          client.request(test.url)
+            .then(result => ({ ...test, success: true, total: result.total }))
+            .catch(err => ({ ...test, success: false, error: err.message }))
+        );
+        
+        return Promise.all(testPromises);
+      }).then(results => {
+        console.log("✅ Capability tests completed:", results);
+        
+        let html = '<div class="debug"><h3>🔍 Resource Access Test Results</h3>';
+        results.forEach(result => {
+          if (result.success) {
+            html += `<p>✅ ${result.name}: ${result.total || 0} resources</p>`;
+          } else {
+            html += `<p>❌ ${result.name}: ${result.error}</p>`;
           }
-          
-          const date = obs.effectiveDateTime ? 
-            new Date(obs.effectiveDateTime).toLocaleDateString() : 'Unknown';
-          
-          html += `
-            <div class="observation">
-              <h4>${display}</h4>
-              <p><strong>Value:</strong> ${value}</p>
-              <p><strong>Date:</strong> ${date}</p>
-            </div>
-          `;
         });
-      } else {
-        html += '<p>No observations found for this encounter</p>';
-      }
-      
-      html += '</div>';
-      document.getElementById("observationInfo").innerHTML = html;
-    }
-
-    function calculateAge(birthDate) {
-      const birth = new Date(birthDate);
-      const today = new Date();
-      let age = today.getFullYear() - birth.getFullYear();
-      const monthDiff = today.getMonth() - birth.getMonth();
-      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-        age--;
-      }
-      return age + ' years';
+        html += '</div>';
+        
+        document.getElementById("testResults").innerHTML = html;
+      }).catch(err => {
+        console.error("❌ Capability tests failed:", err);
+        document.getElementById("testResults").innerHTML = `
+          <div class="error">
+            <h3>❌ Capability Tests: FAILED</h3>
+            <p>${err.message}</p>
+          </div>
+        `;
+      });
     }
   </script>
 </body>
