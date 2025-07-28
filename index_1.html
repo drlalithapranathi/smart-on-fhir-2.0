@@ -4,161 +4,148 @@
   <title>SMART App</title>
   <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f8f9fa; }
-    .container { max-width: 800px; margin: 0 auto; background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; }
     .section { background: #f8f9fa; padding: 20px; margin: 15px 0; border-radius: 6px; border-left: 4px solid #007bff; }
-    .encounter-section { border-left-color: #28a745; }
-    .observation { background: white; border: 1px solid #dee2e6; padding: 15px; margin: 10px 0; border-radius: 4px; }
-    .loading { text-align: center; color: #6c757d; }
+    .encounter { border-left-color: #28a745; }
+    .observation { background: white; border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 4px; }
+    .error { background: #f8d7da; border-left-color: #dc3545; color: #721c24; }
+    button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>SMART App</h1>
-    <div id="output">
-      <div class="loading">
-        <p>Connecting to OpenEMR...</p>
-      </div>
-    </div>
+    <h1>SMART App - Patient Dashboard</h1>
+    <div id="output">Loading...</div>
   </div>
 
   <script>
-    console.log("SMART App: Starting...");
+    console.log("Starting SMART App...");
     
     FHIR.oauth2.ready().then(client => {
-      console.log("SMART App: Connected successfully");
-      console.log("Patient context:", client.patient?.id);
-      console.log("Server URL:", client.state.serverUrl);
+      console.log("Connected to FHIR server");
       
-      // Since you only have one patient (Pranathi Test), let's find and load automatically
-      document.getElementById("output").innerHTML = `
-        <div class="loading">
-          <p>Connected successfully! Finding patient data...</p>
-        </div>
-      `;
-      
-      // Search for patients and auto-load the first one (since you only have Pranathi Test)
-      client.request("Patient?_count=1").then(bundle => {
-        console.log("Patient search result:", bundle);
-        
-        if (bundle.entry && bundle.entry.length > 0) {
-          const patient = bundle.entry[0].resource;
-          console.log("Found patient:", patient.id, patient.name);
-          loadPatientData(patient.id, client);
-        } else {
-          document.getElementById("output").innerHTML = `
-            <div class="section">
-              <h2>No Patients Found</h2>
-              <p>No patients available in the system</p>
-            </div>
-          `;
-        }
-      }).catch(err => {
-        console.error("Error finding patients:", err);
-        handleTokenError(err);
-      });
+      // Just load the first (and only) patient immediately
+      loadPranathiTest(client);
       
     }).catch(err => {
-      console.error("SMART App: Connection failed", err);
+      console.error("Connection failed:", err);
       document.getElementById("output").innerHTML = `
-        <div class="section">
+        <div class="section error">
           <h2>Connection Failed</h2>
-          <p>Error: ${err.message}</p>
-          <p>Please launch this app from OpenEMR</p>
+          <p>Please launch from OpenEMR and ensure tokens are configured properly</p>
+          <button onclick="location.reload()">Retry</button>
         </div>
       `;
     });
 
-    function loadPatientData(patientId, client) {
-      console.log("Loading data for patient:", patientId);
+    function loadPranathiTest(client) {
+      document.getElementById("output").innerHTML = '<p>Loading Pranathi Test data...</p>';
       
-      document.getElementById("output").innerHTML = `
-        <div class="loading">
-          <p>Loading patient information...</p>
-        </div>
-      `;
+      // Since you only have one patient, search and load automatically
+      client.request("Patient?name=Pranathi&_count=1")
+        .then(bundle => {
+          if (bundle.entry && bundle.entry.length > 0) {
+            const patient = bundle.entry[0].resource;
+            return loadCompletePatientData(client, patient);
+          } else {
+            // Fallback: get any patient
+            return client.request("Patient?_count=1").then(bundle => {
+              if (bundle.entry && bundle.entry.length > 0) {
+                return loadCompletePatientData(client, bundle.entry[0].resource);
+              } else {
+                throw new Error("No patients found");
+              }
+            });
+          }
+        })
+        .catch(err => {
+          console.error("Error:", err);
+          document.getElementById("output").innerHTML = `
+            <div class="section error">
+              <h2>Session Expired</h2>
+              <p>Please close this window and re-launch the app from OpenEMR</p>
+              <p>Error: ${err.message}</p>
+              <button onclick="window.close()">Close Window</button>
+            </div>
+          `;
+        });
+    }
 
-      // Load patient basic info
-      client.request(`Patient/${patientId}`).then(patient => {
-        console.log("Patient loaded:", patient);
+    async function loadCompletePatientData(client, patient) {
+      try {
+        // Display patient info
         displayPatientInfo(patient);
         
-        // Load last encounter
-        return client.request(`Encounter?patient=${patientId}&_sort=-date&_count=1`);
-        
-      }).then(encounterBundle => {
-        console.log("Encounters loaded:", encounterBundle);
+        // Get last encounter
+        const encounterBundle = await client.request(`Encounter?patient=${patient.id}&_sort=-date&_count=1`);
         
         if (encounterBundle.entry && encounterBundle.entry.length > 0) {
-          const lastEncounter = encounterBundle.entry[0].resource;
-          displayEncounterInfo(lastEncounter);
+          const encounter = encounterBundle.entry[0].resource;
+          displayEncounterInfo(encounter);
           
-          // Load observations from this encounter
-          return client.request(`Observation?encounter=${lastEncounter.id}&_sort=date`);
+          // Get observations from that encounter
+          const obsBundle = await client.request(`Observation?encounter=${encounter.id}&_sort=date`);
+          displayObservations(obsBundle.entry || []);
         } else {
           document.getElementById("encounterInfo").innerHTML = `
-            <div class="section encounter-section">
+            <div class="section encounter">
               <h3>Last Encounter</h3>
               <p>No encounters found for this patient</p>
             </div>
           `;
-          return { entry: [] };
+          document.getElementById("observationInfo").innerHTML = `
+            <div class="section">
+              <h3>Observations</h3>
+              <p>No observations available</p>
+            </div>
+          `;
         }
         
-      }).then(observationBundle => {
-        console.log("Observations loaded:", observationBundle);
-        displayObservations(observationBundle.entry || []);
-        
-      }).catch(err => {
+      } catch (err) {
         console.error("Error loading patient data:", err);
-        handleTokenError(err);
-      });
+        document.getElementById("output").innerHTML = `
+          <div class="section error">
+            <h2>Data Loading Failed</h2>
+            <p>Error: ${err.message}</p>
+            <button onclick="location.reload()">Retry</button>
+          </div>
+        `;
+      }
     }
 
     function displayPatientInfo(patient) {
       const name = patient.name?.[0];
       const fullName = name ? `${name.given?.join(" ")} ${name.family}` : "Unnamed Patient";
       const age = patient.birthDate ? calculateAge(patient.birthDate) : 'Unknown';
-      const gender = patient.gender || 'Not specified';
       
       document.getElementById("output").innerHTML = `
-        <h2>Patient Information Dashboard</h2>
-        
         <div class="section">
-          <h3>Patient Details</h3>
+          <h2>Patient Information</h2>
           <p><strong>Name:</strong> ${fullName}</p>
           <p><strong>Age:</strong> ${age}</p>
-          <p><strong>Gender:</strong> ${gender}</p>
+          <p><strong>Gender:</strong> ${patient.gender || 'Not specified'}</p>
           <p><strong>Birth Date:</strong> ${patient.birthDate || 'Not provided'}</p>
           <p><strong>Patient ID:</strong> ${patient.id}</p>
         </div>
-
-        <div id="encounterInfo">
-          <div class="loading"><p>Loading encounter information...</p></div>
-        </div>
         
-        <div id="observationInfo">
-          <div class="loading"><p>Loading observations...</p></div>
-        </div>
+        <div id="encounterInfo">Loading encounter...</div>
+        <div id="observationInfo">Loading observations...</div>
       `;
     }
 
     function displayEncounterInfo(encounter) {
-      const encounterDate = encounter.period?.start ? 
-        new Date(encounter.period.start).toLocaleDateString() + ' ' + 
-        new Date(encounter.period.start).toLocaleTimeString() : 'Unknown date';
-      
-      const encounterType = encounter.type?.[0]?.coding?.[0]?.display || 
+      const date = encounter.period?.start ? 
+        new Date(encounter.period.start).toLocaleDateString() : 'Unknown';
+      const type = encounter.type?.[0]?.coding?.[0]?.display || 
         encounter.type?.[0]?.text || 'Unknown type';
       
-      const encounterStatus = encounter.status || 'Unknown status';
-      
       document.getElementById("encounterInfo").innerHTML = `
-        <div class="section encounter-section">
+        <div class="section encounter">
           <h3>Last Encounter</h3>
-          <p><strong>Date:</strong> ${encounterDate}</p>
-          <p><strong>Type:</strong> ${encounterType}</p>
-          <p><strong>Status:</strong> ${encounterStatus}</p>
+          <p><strong>Date:</strong> ${date}</p>
+          <p><strong>Type:</strong> ${type}</p>
+          <p><strong>Status:</strong> ${encounter.status || 'Unknown'}</p>
           <p><strong>Encounter ID:</strong> ${encounter.id}</p>
         </div>
       `;
@@ -172,31 +159,25 @@
       
       if (observations.length > 0) {
         html += `<p>Found ${observations.length} observations:</p>`;
-        
         observations.forEach(entry => {
           const obs = entry.resource;
-          const display = obs.code?.coding?.[0]?.display || obs.code?.text || 'Unknown Observation';
+          const display = obs.code?.coding?.[0]?.display || obs.code?.text || 'Unknown';
+          let value = 'No value';
           
-          let value = 'No value recorded';
           if (obs.valueQuantity) {
-            value = `${obs.valueQuantity.value} ${obs.valueQuantity.unit || obs.valueQuantity.code || ''}`;
+            value = `${obs.valueQuantity.value} ${obs.valueQuantity.unit || ''}`;
           } else if (obs.valueString) {
             value = obs.valueString;
-          } else if (obs.valueCodeableConcept) {
-            value = obs.valueCodeableConcept.text || obs.valueCodeableConcept.coding?.[0]?.display || 'Coded value';
           }
           
           const date = obs.effectiveDateTime ? 
-            new Date(obs.effectiveDateTime).toLocaleString() : 'Unknown date';
-          
-          const status = obs.status || 'Unknown';
+            new Date(obs.effectiveDateTime).toLocaleDateString() : 'Unknown';
           
           html += `
             <div class="observation">
               <h4>${display}</h4>
               <p><strong>Value:</strong> ${value}</p>
-              <p><strong>Date/Time:</strong> ${date}</p>
-              <p><strong>Status:</strong> ${status}</p>
+              <p><strong>Date:</strong> ${date}</p>
             </div>
           `;
         });
@@ -208,37 +189,9 @@
       document.getElementById("observationInfo").innerHTML = html;
     }
 
-    function handleTokenError(err) {
-      console.error("Token/Session error:", err);
-      
-      if (err.status === 401 || err.message.includes('401') || err.message.includes('Unauthorized')) {
-        document.getElementById("output").innerHTML = `
-          <div class="section" style="border-left-color: #dc3545; background: #f8d7da;">
-            <h2>Session Expired</h2>
-            <p>Your session has expired. Please re-launch the app from OpenEMR.</p>
-            <p><strong>Error:</strong> ${err.message}</p>
-            <button onclick="window.close()" style="background: #dc3545; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer;">
-              Close and Re-launch
-            </button>
-          </div>
-        `;
-      } else {
-        document.getElementById("output").innerHTML = `
-          <div class="section" style="border-left-color: #dc3545; background: #f8d7da;">
-            <h2>Error</h2>
-            <p><strong>Error:</strong> ${err.message}</p>
-            <p><strong>Status:</strong> ${err.status || 'Unknown'}</p>
-            <button onclick="location.reload()" style="background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer;">
-              Retry
-            </button>
-          </div>
-        `;
-      }
-    }
-
     function calculateAge(birthDate) {
-      const today = new Date();
       const birth = new Date(birthDate);
+      const today = new Date();
       let age = today.getFullYear() - birth.getFullYear();
       const monthDiff = today.getMonth() - birth.getMonth();
       if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
