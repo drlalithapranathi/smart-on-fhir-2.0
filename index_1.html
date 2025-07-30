@@ -36,49 +36,6 @@
       return null;
     }
 
-    // Extract patient from launch token
-    async function extractPatientFromLaunchToken(client) {
-      try {
-        // Get the launch token from URL params
-        const urlParams = new URLSearchParams(window.location.search);
-        const launch = urlParams.get('launch');
-        
-        if (!launch) {
-          throw new Error('No launch token found');
-        }
-        
-        console.log("Trying to extract patient from launch token...");
-        
-        // Try to use OpenEMR's internal API to decode the launch token
-        const baseUrl = client.state.serverUrl.replace('/apis/default/fhir', '');
-        const launchUrl = `${baseUrl}/interface/smart/launch-context?launch=${encodeURIComponent(launch)}`;
-        
-        console.log("Trying launch URL:", launchUrl);
-        
-        const launchResponse = await fetch(launchUrl, {
-          headers: {
-            'Authorization': `Bearer ${client.state.tokenResponse.access_token}`,
-            'Accept': 'application/json'
-          }
-        });
-        
-        console.log("Launch response status:", launchResponse.status);
-        
-        if (launchResponse.ok) {
-          const launchContext = await launchResponse.json();
-          console.log("Launch context response:", launchContext);
-          if (launchContext.patient) {
-            return launchContext.patient;
-          }
-        }
-        
-        throw new Error('Could not extract patient from launch token');
-      } catch (error) {
-        console.error('Launch token extraction failed:', error);
-        return null;
-      }
-    }
-
     // Display patient info
     function displayPatientInfo(patient, source = "FHIR Context") {
       const patientHtml = `
@@ -164,9 +121,9 @@
       `;
     });
 
-    // Try to get current patient with all workarounds
+    // DEMO HACK: Get first available patient
     function testCurrentPatient() {
-      FHIR.oauth2.ready().then(async client => {
+      FHIR.oauth2.ready().then(client => {
         // First try normal patient context
         if (client.patient?.id) {
           console.log("Using FHIR patient context:", client.patient.id);
@@ -175,39 +132,18 @@
           });
         }
         
-        // NEW: Try to extract from launch token
-        console.log("Trying launch token extraction...");
-        const patientFromLaunch = await extractPatientFromLaunchToken(client);
-        if (patientFromLaunch) {
-          console.log("Got patient from launch token:", patientFromLaunch);
-          return client.request(`Patient/${patientFromLaunch}`)
-            .then(patient => {
-              displayPatientInfo(patient, "Extracted from Launch Token");
-            });
-        }
+        console.log("Demo mode: Getting first available patient");
         
-        // Fallback: try to extract from referrer
-        const extractedPid = extractPatientFromReferrer();
-        if (extractedPid) {
-          console.log("Trying workaround with extracted ID:", extractedPid);
-          // Try to get patient by ID
-          return client.request(`Patient/${extractedPid}`)
-            .then(patient => {
-              displayPatientInfo(patient, "Extracted from Referrer (Workaround)");
-            })
-            .catch(() => {
-              // Try alternative search
-              return client.request(`Patient?identifier=${extractedPid}`)
-                .then(result => {
-                  if (result.entry && result.entry.length > 0) {
-                    const patient = result.entry[0].resource;
-                    displayPatientInfo(patient, "Found by Identifier Search");
-                  }
-                });
-            });
-        }
-        
-        throw new Error("No patient context and no workaround available");
+        // Demo hack - just get the first patient
+        return client.request("Patient?_count=1")
+          .then(result => {
+            if (result.entry && result.entry.length > 0) {
+              const patient = result.entry[0].resource;
+              displayPatientInfo(patient, "Demo: First Available Patient");
+            } else {
+              throw new Error("No patients found in the system");
+            }
+          });
         
       }).catch(err => {
         console.error("❌ Could not get patient:", err);
