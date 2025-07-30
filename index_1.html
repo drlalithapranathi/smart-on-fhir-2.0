@@ -1,267 +1,108 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>SMART App Debug</title>
+  <title>SMART on FHIR Debug</title>
   <script src="https://cdn.jsdelivr.net/npm/fhirclient/build/fhir-client.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
-    .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; }
-    .debug { background: #e7f3ff; padding: 15px; margin: 10px 0; border-left: 4px solid #007bff; font-family: monospace; font-size: 12px; }
-    .error { background: #f8d7da; padding: 15px; margin: 10px 0; border-left: 4px solid #dc3545; }
-    .success { background: #d4edda; padding: 15px; margin: 10px 0; border-left: 4px solid #28a745; }
-    .warning { background: #fff3cd; padding: 15px; margin: 10px 0; border-left: 4px solid #ffc107; }
-    .patient-info { background: #e8f5e8; padding: 15px; margin: 10px 0; border-left: 4px solid #28a745; }
-    button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+    body { font-family: monospace; padding: 20px; }
+    .section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+    .success { background: #d4edda; }
+    .error { background: #f8d7da; }
+    .info { background: #e7f3ff; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>SMART App - Diagnostic Mode</h1>
-    <div id="output">Starting diagnostics...</div>
-  </div>
+  <h1>SMART on FHIR Debug Tool</h1>
+  <div id="output">Loading...</div>
 
   <script>
-    console.log("=== SMART App Diagnostic Mode ===");
-    
-    // Extract patient ID from referrer URL
-    function extractPatientFromReferrer() {
-      const referrer = document.referrer;
-      console.log("Document referrer:", referrer);
-      const pidMatch = referrer.match(/set_pid=(\d+)/);
-      if (pidMatch) {
-        const pid = pidMatch[1];
-        console.log("📍 Found patient ID from referrer:", pid);
-        return pid;
-      }
-      return null;
+    function log(message, data = null) {
+      const div = document.createElement('div');
+      div.className = 'section info';
+      div.innerHTML = `<strong>${message}</strong>` + (data ? `<pre>${JSON.stringify(data, null, 2)}</pre>` : '');
+      document.getElementById('output').appendChild(div);
     }
 
-    // Display patient info
-    function displayPatientInfo(patient, source = "FHIR Context") {
-      const patientHtml = `
-        <div class="patient-info">
-          <h3>👤 Patient Information (Source: ${source})</h3>
-          <p><strong>ID:</strong> ${patient.id}</p>
-          <p><strong>Name:</strong> ${patient.name?.[0]?.given?.join(' ')} ${patient.name?.[0]?.family}</p>
-          <p><strong>Gender:</strong> ${patient.gender}</p>
-          <p><strong>Birth Date:</strong> ${patient.birthDate}</p>
-        </div>
-      `;
-      document.getElementById("testResults").innerHTML = patientHtml + document.getElementById("testResults").innerHTML;
+    function logSuccess(message, data = null) {
+      const div = document.createElement('div');
+      div.className = 'section success';
+      div.innerHTML = `<strong>✅ ${message}</strong>` + (data ? `<pre>${JSON.stringify(data, null, 2)}</pre>` : '');
+      document.getElementById('output').appendChild(div);
     }
-    
+
+    function logError(message, data = null) {
+      const div = document.createElement('div');
+      div.className = 'section error';
+      div.innerHTML = `<strong>❌ ${message}</strong>` + (data ? `<pre>${JSON.stringify(data, null, 2)}</pre>` : '');
+      document.getElementById('output').appendChild(div);
+    }
+
+    document.getElementById('output').innerHTML = '';
+
+    // Check URL parameters
+    const params = new URLSearchParams(window.location.search);
+    const urlInfo = {
+      currentUrl: window.location.href,
+      referrer: document.referrer,
+      parameters: Object.fromEntries(params)
+    };
+    log('URL Information', urlInfo);
+
+    // Try SMART connection
     FHIR.oauth2.ready().then(client => {
-      console.log("✅ FHIR.oauth2.ready() succeeded");
-      
-      // Comprehensive debugging
-      const debugInfo = {
-        hasClient: !!client,
-        hasState: !!client.state,
-        hasTokenResponse: !!client.state?.tokenResponse,
+      logSuccess('SMART Connection Successful');
+
+      const clientInfo = {
         serverUrl: client.state?.serverUrl,
         tokenType: client.state?.tokenResponse?.token_type,
-        accessToken: client.state?.tokenResponse?.access_token ? "Present" : "Missing",
+        hasAccessToken: !!client.state?.tokenResponse?.access_token,
         scope: client.state?.tokenResponse?.scope,
-        expiresIn: client.state?.tokenResponse?.expires_in,
-        patientContext: client.patient?.id || "None",
-        userContext: client.user?.resourceType || "None",
-        referrer: document.referrer
+        patientId: client.patient?.id || null,
+        userId: client.user?.id || null
       };
-      
-      console.log("Debug Info:", debugInfo);
-      
-      // Check for patient context workaround
-      const hasPatientContext = !!(client.patient?.id);
-      const extractedPid = extractPatientFromReferrer();
-      
-      let patientContextHtml = '';
-      if (hasPatientContext) {
-        patientContextHtml = `<div class="success"><h3>✅ Patient Context Available</h3><p>Patient ID: ${client.patient.id}</p></div>`;
-      } else if (extractedPid) {
-        patientContextHtml = `<div class="warning"><h3>⚠️ No Patient Context, but Found Patient ID: ${extractedPid}</h3><p>Attempting workaround...</p></div>`;
+      log('Client Information', clientInfo);
+
+      // Test basic server access
+      client.request('metadata').then(metadata => {
+        logSuccess('Server Metadata Retrieved', {
+          fhirVersion: metadata.fhirVersion,
+          software: metadata.software?.name
+        });
+      }).catch(err => {
+        logError('Metadata Request Failed', { error: err.message });
+      });
+
+      // Test patient access
+      if (client.patient?.id) {
+        client.patient.read().then(patient => {
+          logSuccess('Patient Data Retrieved', {
+            id: patient.id,
+            name: patient.name?.[0]?.family + ', ' + patient.name?.[0]?.given?.join(' '),
+            birthDate: patient.birthDate
+          });
+        }).catch(err => {
+          logError('Patient Read Failed', { error: err.message });
+        });
       } else {
-        patientContextHtml = `<div class="error"><h3>❌ No Patient Context Available</h3></div>`;
-      }
-      
-      document.getElementById("output").innerHTML = `
-        <div class="success">
-          <h2>✅ Connection Successful</h2>
-          <p>SMART on FHIR client initialized successfully</p>
-        </div>
-        
-        ${patientContextHtml}
-        
-        <div class="debug">
-          <h3>🔍 Debug Information</h3>
-          <pre>${JSON.stringify(debugInfo, null, 2)}</pre>
-        </div>
-        
-        <div style="margin: 20px 0;">
-          <button onclick="testCurrentPatient()">Get Current Patient</button>
-          <button onclick="testPatientAccess()">Test Patient Access</button>
-          <button onclick="testBasicFhir()">Test Basic FHIR</button>
-          <button onclick="testCapabilities()">Test Server Capabilities</button>
-        </div>
-        
-        <div id="testResults"></div>
-      `;
-
-      // Try to get patient immediately
-      testCurrentPatient();
-      
-    }).catch(err => {
-      console.error("❌ FHIR.oauth2.ready() failed:", err);
-      document.getElementById("output").innerHTML = `
-        <div class="error">
-          <h2>❌ Connection Failed</h2>
-          <p><strong>Error:</strong> ${err.message}</p>
-          <p><strong>Type:</strong> ${err.name}</p>
-          <pre>${err.stack}</pre>
-        </div>
-      `;
-    });
-
-    // DEMO HACK: Get first available patient
-    function testCurrentPatient() {
-      FHIR.oauth2.ready().then(client => {
-        // First try normal patient context
-        if (client.patient?.id) {
-          console.log("Using FHIR patient context:", client.patient.id);
-          return client.patient.read().then(patient => {
-            displayPatientInfo(patient, "FHIR Patient Context");
-          });
-        }
-        
-        console.log("Demo mode: Getting first available patient");
-        
-        // Demo hack - just get the first patient
-        return client.request("Patient?_count=1")
-          .then(result => {
-            if (result.entry && result.entry.length > 0) {
-              const patient = result.entry[0].resource;
-              displayPatientInfo(patient, "Demo: First Available Patient");
-            } else {
-              throw new Error("No patients found in the system");
-            }
-          });
-        
-      }).catch(err => {
-        console.error("❌ Could not get patient:", err);
-        document.getElementById("testResults").innerHTML = `
-          <div class="error">
-            <h3>❌ Patient Access: FAILED</h3>
-            <p><strong>Error:</strong> ${err.message}</p>
-          </div>
-        ` + document.getElementById("testResults").innerHTML;
-      });
-    }
-
-    function testPatientAccess() {
-      document.getElementById("testResults").innerHTML = '<p>🔄 Testing patient access...</p>';
-      
-      FHIR.oauth2.ready().then(client => {
-        console.log("Testing Patient?_count=1");
-        
-        return client.request("Patient?_count=1", {
-          headers: {
-            'Accept': 'application/fhir+json',
-            'Cache-Control': 'no-cache'
-          }
-        });
-      }).then(result => {
-        console.log("✅ Patient access successful:", result);
-        document.getElementById("testResults").innerHTML = `
-          <div class="success">
-            <h3>✅ Patient Access: SUCCESS</h3>
-            <p>Successfully retrieved patient data</p>
-            <p><strong>Total patients:</strong> ${result.total || 'Unknown'}</p>
-            <p><strong>Returned:</strong> ${result.entry?.length || 0} patients</p>
-            <pre>${JSON.stringify(result, null, 2).substring(0, 500)}...</pre>
-          </div>
-        `;
-      }).catch(err => {
-        console.error("❌ Patient access failed:", err);
-        document.getElementById("testResults").innerHTML = `
-          <div class="error">
-            <h3>❌ Patient Access: FAILED</h3>
-            <p><strong>Status:</strong> ${err.status}</p>
-            <p><strong>Message:</strong> ${err.message}</p>
-            <p><strong>URL:</strong> ${err.url || 'Unknown'}</p>
-            <pre>${JSON.stringify(err, null, 2)}</pre>
-          </div>
-        `;
-      });
-    }
-
-    function testBasicFhir() {
-      document.getElementById("testResults").innerHTML = '<p>🔄 Testing basic FHIR access...</p>';
-      
-      FHIR.oauth2.ready().then(client => {
-        console.log("Testing metadata endpoint");
-        return client.request("metadata");
-      }).then(result => {
-        console.log("✅ Metadata access successful");
-        document.getElementById("testResults").innerHTML = `
-          <div class="success">
-            <h3>✅ Basic FHIR: SUCCESS</h3>
-            <p>Server metadata retrieved successfully</p>
-            <p><strong>FHIR Version:</strong> ${result.fhirVersion}</p>
-            <p><strong>Software:</strong> ${result.software?.name}</p>
-          </div>
-        `;
-      }).catch(err => {
-        console.error("❌ Metadata access failed:", err);
-        document.getElementById("testResults").innerHTML = `
-          <div class="error">
-            <h3>❌ Basic FHIR: FAILED</h3>
-            <p><strong>Error:</strong> ${err.message}</p>
-          </div>
-        `;
-      });
-    }
-
-    function testCapabilities() {
-      document.getElementById("testResults").innerHTML = '<p>🔄 Testing server capabilities...</p>';
-      
-      FHIR.oauth2.ready().then(client => {
-        // Test what we can actually access
-        const tests = [
-          { name: "Patient", url: "Patient?_summary=count" },
-          { name: "Encounter", url: "Encounter?_summary=count" },
-          { name: "Observation", url: "Observation?_summary=count" }
-        ];
-        
-        const testPromises = tests.map(test => 
-          client.request(test.url)
-            .then(result => ({ ...test, success: true, total: result.total }))
-            .catch(err => ({ ...test, success: false, error: err.message }))
-        );
-        
-        return Promise.all(testPromises);
-      }).then(results => {
-        console.log("✅ Capability tests completed:", results);
-        
-        let html = '<div class="debug"><h3>🔍 Resource Access Test Results</h3>';
-        results.forEach(result => {
-          if (result.success) {
-            html += `<p>✅ ${result.name}: ${result.total || 0} resources</p>`;
+        log('No Patient Context Available - trying general patient query');
+        client.request('Patient?_count=1').then(result => {
+          if (result.entry?.length > 0) {
+            const patient = result.entry[0].resource;
+            logSuccess('Sample Patient Retrieved', {
+              id: patient.id,
+              name: patient.name?.[0]?.family + ', ' + patient.name?.[0]?.given?.join(' ')
+            });
           } else {
-            html += `<p>❌ ${result.name}: ${result.error}</p>`;
+            logError('No Patients Found');
           }
+        }).catch(err => {
+          logError('Patient Query Failed', { error: err.message });
         });
-        html += '</div>';
-        
-        document.getElementById("testResults").innerHTML = html;
-      }).catch(err => {
-        console.error("❌ Capability tests failed:", err);
-        document.getElementById("testResults").innerHTML = `
-          <div class="error">
-            <h3>❌ Capability Tests: FAILED</h3>
-            <p>${err.message}</p>
-          </div>
-        `;
-      });
-    }
+      }
+
+    }).catch(err => {
+      logError('SMART Connection Failed', { error: err.message, stack: err.stack });
+    });
   </script>
 </body>
 </html>
