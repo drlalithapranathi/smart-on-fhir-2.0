@@ -9,6 +9,8 @@
     .debug { background: #e7f3ff; padding: 15px; margin: 10px 0; border-left: 4px solid #007bff; font-family: monospace; font-size: 12px; }
     .error { background: #f8d7da; padding: 15px; margin: 10px 0; border-left: 4px solid #dc3545; }
     .success { background: #d4edda; padding: 15px; margin: 10px 0; border-left: 4px solid #28a745; }
+    .warning { background: #fff3cd; padding: 15px; margin: 10px 0; border-left: 4px solid #ffc107; }
+    .patient-info { background: #e8f5e8; padding: 15px; margin: 10px 0; border-left: 4px solid #28a745; }
     button { background: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
   </style>
 </head>
@@ -20,6 +22,33 @@
 
   <script>
     console.log("=== SMART App Diagnostic Mode ===");
+    
+    // ADD THIS: Extract patient ID from referrer URL
+    function extractPatientFromReferrer() {
+      const referrer = document.referrer;
+      console.log("Document referrer:", referrer);
+      const pidMatch = referrer.match(/set_pid=(\d+)/);
+      if (pidMatch) {
+        const pid = pidMatch[1];
+        console.log("📍 Found patient ID from referrer:", pid);
+        return pid;
+      }
+      return null;
+    }
+
+    // ADD THIS: Display patient info
+    function displayPatientInfo(patient, source = "FHIR Context") {
+      const patientHtml = `
+        <div class="patient-info">
+          <h3>👤 Patient Information (Source: ${source})</h3>
+          <p><strong>ID:</strong> ${patient.id}</p>
+          <p><strong>Name:</strong> ${patient.name?.[0]?.given?.join(' ')} ${patient.name?.[0]?.family}</p>
+          <p><strong>Gender:</strong> ${patient.gender}</p>
+          <p><strong>Birth Date:</strong> ${patient.birthDate}</p>
+        </div>
+      `;
+      document.getElementById("testResults").innerHTML = patientHtml + document.getElementById("testResults").innerHTML;
+    }
     
     FHIR.oauth2.ready().then(client => {
       console.log("✅ FHIR.oauth2.ready() succeeded");
@@ -35,10 +64,24 @@
         scope: client.state?.tokenResponse?.scope,
         expiresIn: client.state?.tokenResponse?.expires_in,
         patientContext: client.patient?.id || "None",
-        userContext: client.user?.resourceType || "None"
+        userContext: client.user?.resourceType || "None",
+        referrer: document.referrer  // ADD THIS LINE
       };
       
       console.log("Debug Info:", debugInfo);
+      
+      // ADD THIS: Check for patient context workaround
+      const hasPatientContext = !!(client.patient?.id);
+      const extractedPid = extractPatientFromReferrer();
+      
+      let patientContextHtml = '';
+      if (hasPatientContext) {
+        patientContextHtml = `<div class="success"><h3>✅ Patient Context Available</h3><p>Patient ID: ${client.patient.id}</p></div>`;
+      } else if (extractedPid) {
+        patientContextHtml = `<div class="warning"><h3>⚠️ No Patient Context, but Found Patient ID: ${extractedPid}</h3><p>Attempting workaround...</p></div>`;
+      } else {
+        patientContextHtml = `<div class="error"><h3>❌ No Patient Context Available</h3></div>`;
+      }
       
       document.getElementById("output").innerHTML = `
         <div class="success">
@@ -46,12 +89,15 @@
           <p>SMART on FHIR client initialized successfully</p>
         </div>
         
+        ${patientContextHtml}
+        
         <div class="debug">
           <h3>🔍 Debug Information</h3>
           <pre>${JSON.stringify(debugInfo, null, 2)}</pre>
         </div>
         
         <div style="margin: 20px 0;">
+          <button onclick="testCurrentPatient()">Get Current Patient</button>
           <button onclick="testPatientAccess()">Test Patient Access</button>
           <button onclick="testBasicFhir()">Test Basic FHIR</button>
           <button onclick="testCapabilities()">Test Server Capabilities</button>
@@ -59,6 +105,9 @@
         
         <div id="testResults"></div>
       `;
+
+      // ADD THIS: Try to get patient immediately
+      testCurrentPatient();
       
     }).catch(err => {
       console.error("❌ FHIR.oauth2.ready() failed:", err);
@@ -71,6 +120,51 @@
         </div>
       `;
     });
+
+    // ADD THIS NEW FUNCTION: Try to get current patient with workaround
+    function testCurrentPatient() {
+      FHIR.oauth2.ready().then(client => {
+        // First try normal patient context
+        if (client.patient?.id) {
+          console.log("Using FHIR patient context:", client.patient.id);
+          return client.patient.read().then(patient => {
+            displayPatientInfo(patient, "FHIR Patient Context");
+          });
+        }
+        
+        // Workaround: try to extract from referrer
+        const extractedPid = extractPatientFromReferrer();
+        if (extractedPid) {
+          console.log("Trying workaround with extracted ID:", extractedPid);
+          // Try to get patient by ID
+          return client.request(`Patient/${extractedPid}`)
+            .then(patient => {
+              displayPatientInfo(patient, "Extracted from Referrer (Workaround)");
+            })
+            .catch(() => {
+              // Try alternative search
+              return client.request(`Patient?identifier=${extractedPid}`)
+                .then(result => {
+                  if (result.entry && result.entry.length > 0) {
+                    const patient = result.entry[0].resource;
+                    displayPatientInfo(patient, "Found by Identifier Search");
+                  }
+                });
+            });
+        }
+        
+        throw new Error("No patient context and no workaround available");
+        
+      }).catch(err => {
+        console.error("❌ Could not get patient:", err);
+        document.getElementById("testResults").innerHTML = `
+          <div class="error">
+            <h3>❌ Patient Access: FAILED</h3>
+            <p><strong>Error:</strong> ${err.message}</p>
+          </div>
+        ` + document.getElementById("testResults").innerHTML;
+      });
+    }
 
     function testPatientAccess() {
       document.getElementById("testResults").innerHTML = '<p>🔄 Testing patient access...</p>';
