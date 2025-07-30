@@ -13,11 +13,29 @@
     const iss = params.get("iss");
     const launch = params.get("launch");
     
-    // Debug info
+    // Enhanced debugging - log to console
+    console.log("=== SMART Launch Debug Info ===");
+    console.log("Launch token (URL decoded):", decodeURIComponent(launch || ""));
+    console.log("Launch token length:", launch ? launch.length : 0);
+    console.log("ISS:", iss);
+    
+    // Log all URL parameters
+    const allParams = {};
+    for (const [key, value] of params) {
+      allParams[key] = value;
+    }
+    console.log("All launch parameters:", allParams);
+    console.log("Current URL:", window.location.href);
+    
+    // Enhanced debug info display
     document.getElementById("debug").innerHTML = `
       <h3>Debug Info:</h3>
-      <p>ISS: ${iss}</p>
-      <p>Launch: ${launch}</p>
+      <p><strong>ISS:</strong> ${iss}</p>
+      <p><strong>Launch Token:</strong> ${launch ? launch.substring(0, 50) + '...' : 'MISSING'}</p>
+      <p><strong>Launch Token Length:</strong> ${launch ? launch.length : 0}</p>
+      <p><strong>Launch Token (decoded first 100 chars):</strong> ${launch ? decodeURIComponent(launch).substring(0, 100) + '...' : 'MISSING'}</p>
+      <h4>All Parameters:</h4>
+      <pre>${JSON.stringify(allParams, null, 2)}</pre>
     `;
     
     if (!iss || !launch) {
