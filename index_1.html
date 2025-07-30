@@ -23,7 +23,7 @@
   <script>
     console.log("=== SMART App Diagnostic Mode ===");
     
-    // ADD THIS: Extract patient ID from referrer URL
+    // Extract patient ID from referrer URL
     function extractPatientFromReferrer() {
       const referrer = document.referrer;
       console.log("Document referrer:", referrer);
@@ -36,7 +36,50 @@
       return null;
     }
 
-    // ADD THIS: Display patient info
+    // Extract patient from launch token
+    async function extractPatientFromLaunchToken(client) {
+      try {
+        // Get the launch token from URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const launch = urlParams.get('launch');
+        
+        if (!launch) {
+          throw new Error('No launch token found');
+        }
+        
+        console.log("Trying to extract patient from launch token...");
+        
+        // Try to use OpenEMR's internal API to decode the launch token
+        const baseUrl = client.state.serverUrl.replace('/apis/default/fhir', '');
+        const launchUrl = `${baseUrl}/interface/smart/launch-context?launch=${encodeURIComponent(launch)}`;
+        
+        console.log("Trying launch URL:", launchUrl);
+        
+        const launchResponse = await fetch(launchUrl, {
+          headers: {
+            'Authorization': `Bearer ${client.state.tokenResponse.access_token}`,
+            'Accept': 'application/json'
+          }
+        });
+        
+        console.log("Launch response status:", launchResponse.status);
+        
+        if (launchResponse.ok) {
+          const launchContext = await launchResponse.json();
+          console.log("Launch context response:", launchContext);
+          if (launchContext.patient) {
+            return launchContext.patient;
+          }
+        }
+        
+        throw new Error('Could not extract patient from launch token');
+      } catch (error) {
+        console.error('Launch token extraction failed:', error);
+        return null;
+      }
+    }
+
+    // Display patient info
     function displayPatientInfo(patient, source = "FHIR Context") {
       const patientHtml = `
         <div class="patient-info">
@@ -65,12 +108,12 @@
         expiresIn: client.state?.tokenResponse?.expires_in,
         patientContext: client.patient?.id || "None",
         userContext: client.user?.resourceType || "None",
-        referrer: document.referrer  // ADD THIS LINE
+        referrer: document.referrer
       };
       
       console.log("Debug Info:", debugInfo);
       
-      // ADD THIS: Check for patient context workaround
+      // Check for patient context workaround
       const hasPatientContext = !!(client.patient?.id);
       const extractedPid = extractPatientFromReferrer();
       
@@ -106,7 +149,7 @@
         <div id="testResults"></div>
       `;
 
-      // ADD THIS: Try to get patient immediately
+      // Try to get patient immediately
       testCurrentPatient();
       
     }).catch(err => {
@@ -121,9 +164,9 @@
       `;
     });
 
-    // ADD THIS NEW FUNCTION: Try to get current patient with workaround
+    // Try to get current patient with all workarounds
     function testCurrentPatient() {
-      FHIR.oauth2.ready().then(client => {
+      FHIR.oauth2.ready().then(async client => {
         // First try normal patient context
         if (client.patient?.id) {
           console.log("Using FHIR patient context:", client.patient.id);
@@ -132,7 +175,18 @@
           });
         }
         
-        // Workaround: try to extract from referrer
+        // NEW: Try to extract from launch token
+        console.log("Trying launch token extraction...");
+        const patientFromLaunch = await extractPatientFromLaunchToken(client);
+        if (patientFromLaunch) {
+          console.log("Got patient from launch token:", patientFromLaunch);
+          return client.request(`Patient/${patientFromLaunch}`)
+            .then(patient => {
+              displayPatientInfo(patient, "Extracted from Launch Token");
+            });
+        }
+        
+        // Fallback: try to extract from referrer
         const extractedPid = extractPatientFromReferrer();
         if (extractedPid) {
           console.log("Trying workaround with extracted ID:", extractedPid);
